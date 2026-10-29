@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Koe Na Win">
+  <title>Koe Na Win Companion</title>
+  <style>
+    :root {
+      --primary: #1b5e20;
+      --veg-bg: #d4edda;
+      --veg-text: #155724;
+      --bg: #f8f9fa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: #333; padding-bottom: 20px; }
+    
+    /* Navigation Tabs */
+    .tabs { display: flex; background: #fff; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 10; }
+    .tab { flex: 1; padding: 15px 0; text-align: center; font-weight: bold; color: #666; background: none; border: none; font-size: 16px; cursor: pointer; }
+    .tab.active { color: var(--primary); border-bottom: 3px solid var(--primary); }
+    
+    /* Views */
+    .view { display: none; padding: 20px; }
+    .view.active { display: block; }
+    
+    /* Schedule View */
+    .controls { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    input[type="date"] { padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; width: 100%; }
+    .btn { padding: 14px; font-size: 16px; font-weight: bold; background: var(--primary); color: #fff; border: none; border-radius: 8px; text-align: center; cursor: pointer; }
+    .btn:active { opacity: 0.8; }
+    
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; text-align: center; font-size: 14px; }
+    .card.veg { background: var(--veg-bg); border-color: #c3e6cb; color: var(--veg-text); font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card .round { font-size: 12px; color: #666; }
+    .card.veg .round { color: var(--veg-text); }
+    
+    /* Bead Counter View */
+    .counter-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; gap: 30px; }
+    .bead-circle { width: 250px; height: 250px; border-radius: 50%; background: #fff; border: 8px solid var(--primary); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1); cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+    .bead-circle:active { transform: scale(0.96); transition: 0.1s; background: #f0f7f0; }
+    .count-number { font-size: 72px; font-weight: bold; color: var(--primary); }
+    .count-label { font-size: 18px; color: #666; }
+    .stats { text-align: center; font-size: 20px; font-weight: bold; color: #444; }
+    .reset-btn { background: #e53935; margin-top: 10px; width: 150px; }
+  </style>
+</head>
+<body>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('schedule')">📅 Schedule</button>
+    <button class="tab" onclick="switchTab('chanting')">📿 Chanting</button>
+  </div>
+
+  <!-- Schedule View -->
+  <div id="schedule" class="view active">
+    <div class="controls">
+      <label style="font-weight: bold; color: #444;">1. Select Day 1 Start Date:</label>
+      <input type="date" id="startDate" onchange="generateGrid()">
+      <button class="btn" onclick="downloadICS()">2. Add Vegetarian Days to Apple Calendar</button>
+    </div>
+    <div id="gridOutput" class="grid"></div>
+  </div>
+
+  <!-- Chanting View -->
+  <div id="chanting" class="view">
+    <div class="counter-container">
+      <div class="stats">
+        Completed Rounds: <span id="roundCount" style="color: var(--primary);">0</span>
+      </div>
+      <div class="bead-circle" onclick="tapBead()">
+        <div class="count-number" id="beadCount">0</div>
+        <div class="count-label">/ 108 Beads</div>
+      </div>
+      <button class="btn reset-btn" onclick="resetCounter()">Reset Counters</button>
+    </div>
+  </div>
+
+  <script>
+    // --- State Management ---
+    let startDateStr = localStorage.getItem('koenawin_start') || '';
+    let currentBead = parseInt(localStorage.getItem('koenawin_bead')) || 0;
+    let currentRound = parseInt(localStorage.getItem('koenawin_round')) || 0;
+
+    // --- Initialization ---
+    if (startDateStr) {
+      document.getElementById('startDate').value = startDateStr;
+      generateGrid();
+    }
+    updateCounterDisplay();
+
+    // --- Navigation ---
+    function switchTab(tabId) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.currentTarget.classList.add('active');
+    }
+
+    // --- Schedule & Grid Logic ---
+    function generateGrid() {
+      const input = document.getElementById('startDate').value;
+      if (!input) return;
+      localStorage.setItem('koenawin_start', input);
+      
+      const startParts = input.split('-');
+      // Use local timezone to prevent off-by-one errors from UTC conversion
+      const start = new Date(startParts[0], startParts[1] - 1, startParts[2]); 
+      let html = '';
+      
+      for (let r = 1; r <= 9; r++) {
+        for (let d = 1; d <= 9; d++) {
+          const offset = (r - 1) * 9 + (d - 1);
+          const current = new Date(start);
+          current.setDate(start.getDate() + offset);
+          
+          const isVeg = (d === 5);
+          const dateStr = current.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          
+          html += `<div class="card ${isVeg ? 'veg' : ''}">
+            <div class="round">R${r} - Day ${d}</div>
+            <div style="margin: 6px 0; font-size: 16px;">${dateStr}</div>
+            ${isVeg ? '<div>🥗 Veg</div>' : ''}
+          </div>`;
+        }
+      }
+      document.getElementById('gridOutput').innerHTML = html;
+    }
+
+    // --- Apple Calendar Export ---
+    function downloadICS() {
+      const input = document.getElementById('startDate').value;
+      if (!input) return alert("Please select a start date first.");
+      
+      const startParts = input.split('-');
+      const start = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+      
+      let ics = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Koe Na Win Tracker//EN",
+        "X-WR-CALNAME:Koe Na Win Veg Days"
+      ];
+      
+      for (let r = 1; r <= 9; r++) {
+        const offset = (r - 1) * 9 + 4; // Day 5 is offset index 4
+        const eventDate = new Date(start);
+        eventDate.setDate(start.getDate() + offset);
+        
+        const dateString = eventDate.getFullYear().toString() +
+                           (eventDate.getMonth() + 1).toString().padStart(2, '0') +
+                           eventDate.getDate().toString().padStart(2, '0');
+        
+        ics.push(
+          "BEGIN:VEVENT",
+          `DTSTART;VALUE=DATE:${dateString}`,
+          `SUMMARY:🥗 Vegetarian Day (Round ${r})`,
+          `DESCRIPTION:Koe Na Win 81-Day Vow. Round ${r}, Day 5.`,
+          "TRANSP:TRANSPARENT",
+          "END:VEVENT"
+        );
+      }
+      ics.push("END:VCALENDAR");
+      
+      const blob = new Blob([ics.join('\r\n')], { type: 'text/calendar' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'KoeNaWin.ics';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // --- Bead Counter Logic ---
+    function tapBead() {
+      currentBead++;
+      if (currentBead >= 108) {
+        currentBead = 0;
+        currentRound++;
+        // Optional: Play a short vibration on supported devices
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      }
+      saveCounterState();
+      updateCounterDisplay();
+    }
+
+    function resetCounter() {
+      if (confirm("Reset chanting progress back to 0?")) {
+        currentBead = 0;
+        currentRound = 0;
+        saveCounterState();
+        updateCounterDisplay();
+      }
+    }
+
+    function saveCounterState() {
+      localStorage.setItem('koenawin_bead', currentBead);
+      localStorage.setItem('koenawin_round', currentRound);
+    }
+
+    function updateCounterDisplay() {
+      document.getElementById('beadCount').innerText = currentBead;
+      document.getElementById('roundCount').innerText = currentRound;
+    }
+  </script>
+</body>
+</html>
